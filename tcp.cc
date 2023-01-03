@@ -192,15 +192,6 @@ int main (int argc, char* argv[])
   //Config::SetDefault("ns3::TcpL4Protocol::SocketType", TypeIdValue(TcpVegas::GetTypeId()));
 
 
-
-
-    //CommandLine cmd(__FILE__);
-   // cmd.AddValue("payloadSize", "Payload size in bytes", payloadSize);
-   // cmd.AddValue("dataRate", "Application data ate", dataRate);
-
-   //  cmd.AddValue("phyRate", "Physical layer bitrate", phyRate);
- //   cmd.AddValue("simulationTime", "Simulation time in seconds", simulationTime);
-   // cmd.AddValue("pcap", "Enable/disable PCAP Tracing", pcapTracing);
     cmd.Parse(argc, argv);
 
     tcpVariant = std::string("ns3::") + tcpVariant;
