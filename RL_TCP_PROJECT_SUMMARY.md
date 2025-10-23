@@ -1,7 +1,7 @@
-# NS3 OpenGym Integration - Files Summary
+# NS3 OpenGym RL TCP Project v0.1.10 
 
 ## Overview
-Your NS3 TCP congestion control simulation has been prepared for Reinforcement Learning using the OpenGym module and a DQN (Deep Q-Network) agent.
+ NS3 TCP congestion control simulation has been prepared for Reinforcement Learning using the OpenGym module and a DQN (Deep Q-Network) agent.
 
 ## Modified Files
 
@@ -9,14 +9,14 @@ Your NS3 TCP congestion control simulation has been prepared for Reinforcement L
 **Location**: `/users/mosafer/NS3/tcp.cc`
 
 **Changes Made**:
-- ✅ Added `#include "ns3/opengym-module.h"` for OpenGym support
+- ✅ modified`#include "ns3/opengym-module.h"` for OpenGym support
 - ✅ Created `TcpOpenGymEnv` class implementing the OpenGym interface
   - Observation space: 5D continuous (CWND, RTT, throughput, packet loss, CWND rate)
   - Action space: 5 discrete actions (rate adjustments)
   - Reward function: throughput - 10×loss - 2×RTT
-- ✅ Added command-line parameters for OpenGym configuration
+- ✅ modified command-line parameters for OpenGym configuration
 - ✅ Integrated OpenGym environment with TCP socket traces
-- ✅ Added random seed support for reproducibility
+- ✅ modified random seed support for reproducibility
 
 **Note**: Will show compile error until OpenGym module is installed in NS3.
 
@@ -287,6 +287,7 @@ Reward = Throughput(Mbps) - 10×LossRate - 2×RTT(sec)
 - **NS3 OpenGym**: https://github.com/tkn-tub/ns3-gym
 - **NS3 Documentation**: https://www.nsnam.org/documentation/
 - **DQN Paper**: https://arxiv.org/abs/1312.5602
+- **TCP DQN Paper**:  https://arxiv.org/abs/2508.01047
 
 ## Support
 
