@@ -1,0 +1,19 @@
+# Python Requirements for NS3 OpenGym DQN Training
+
+# Core ML libraries
+torch>=1.9.0
+numpy>=1.19.0
+
+# OpenGym interface
+gym>=0.18.0
+
+# NS3-Gym (install separately from github)
+# Install with: pip install git+https://github.com/tkn-tub/ns3-gym.git#subdirectory=py
+
+# Protocol buffers (specific version for compatibility)
+protobuf==3.20.0
+
+# Optional: for better visualization and logging
+matplotlib>=3.3.0
+tensorboard>=2.5.0
+pandas>=1.2.0

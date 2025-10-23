@@ -1,6 +1,10 @@
-# NS3: Congestion Control Algorithm Comparison
+# NS3: Congestion Control Algorithm Comparison with OpenGym RL Integration
 
-This project utilizes the [ns-3 network simulator](https://www.nsnam.org/) to compare the performance of various TCP congestion control algorithms, including **NewReno** and **Vegas**. The simulations are designed to analyze how these algorithms behave under different network conditions, providing insights into their efficiency and responsiveness.
+This project utilizes the [ns-3 network simulator](https://www.nsnam.org/) to compare the performance of various TCP congestion control algorithms, including **NewReno** and **Vegas**. 
+
+**NEW**: This project now includes integration with **NS3 OpenGym** for Reinforcement Learning-based congestion control using **Deep Q-Networks (DQN)**. The RL agent can learn optimal TCP congestion control policies through interaction with the NS3 simulation.
+
+The simulations are designed to analyze how these algorithms behave under different network conditions, providing insights into their efficiency and responsiveness.
 
 ## Network Topology
 
