@@ -82,6 +82,8 @@ class DQNAgent:
         self.learning_rate = 0.001  # Learning rate
         self.batch_size = 64        # Batch size for training
         self.target_update = 10     # Update target network every N episodes
+        self.alpha = 0.1            # Entropy temperature (Soft Bellman)
+        self.sigma = 0.05           # Brownian diffusion coefficient
         
         # Networks
         self.policy_net = DQNNetwork(state_size, action_size).to(device)
@@ -128,10 +130,20 @@ class DQNAgent:
         # Current Q values
         current_q = self.policy_net(states).gather(1, actions.unsqueeze(1))
         
-        # Next Q values from target network
+        # Next Q values from target network using Soft Bellman + Brownian Movement
         with torch.no_grad():
-            next_q = self.target_net(next_states).max(1)[0]
-            target_q = rewards + (1 - dones) * self.gamma * next_q
+            next_q_values = self.target_net(next_states)
+            
+            # 1. Soft Value (Entropy-regularized value)
+            # Log-Sum-Exp provides a smooth approximation of the maximum
+            soft_value = self.alpha * torch.logsumexp(next_q_values / self.alpha, dim=1)
+            
+            # 2. Brownian Movement (Diffusion term)
+            # Adds stochastic noise representing the "random walk" of network jitter
+            brownian_increment = self.sigma * torch.randn_like(soft_value)
+            
+            # 3. Target Q calculation
+            target_q = rewards + (1 - dones) * self.gamma * (soft_value + brownian_increment)
         
         # Compute loss
         loss = self.criterion(current_q.squeeze(), target_q)
