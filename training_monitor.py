@@ -87,12 +87,13 @@ class TrainingMonitor:
         if len(self.episode_rewards) < 2:
             return
         
-        fig, axes = plt.subplots(3, 2, figsize=(16, 12))
-        
+        #fig, axes = plt.subplots(3, 2, figsize=(16, 12))
+        fig, axes = plt.subplots(4, 2, figsize=(16, 16))
+
         episodes = np.arange(len(self.episode_rewards))
         
         # Plot rewards
-        axes[0, 0].plot(episodes, self.episode_rewards, alpha=0.3, label='Raw', linewidth=0.5)
+        axes[0, 0].plot(episodes, self.episode_rewards, label='Raw', linewidth=2, color='orange')
         if len(self.episode_rewards) >= window_size:
             moving_avg = self._moving_average(self.episode_rewards, window_size)
             axes[0, 0].plot(episodes[window_size-1:], moving_avg, label=f'MA-{window_size}', linewidth=2)
@@ -105,7 +106,7 @@ class TrainingMonitor:
         # Plot losses
         valid_losses = [l for l in self.episode_losses if l > 0]
         if valid_losses:
-            axes[0, 1].plot(episodes[:len(valid_losses)], valid_losses, alpha=0.3, label='Raw', linewidth=0.5)
+            axes[0, 1].plot(episodes[:len(valid_losses)], valid_losses, label='Raw', linewidth=2, color='orange')
             if len(valid_losses) >= window_size:
                 moving_avg = self._moving_average(valid_losses, window_size)
                 axes[0, 1].plot(episodes[window_size-1:len(valid_losses)], moving_avg, 
@@ -126,10 +127,10 @@ class TrainingMonitor:
         axes[1, 0].set_ylim([0, 1.1])
         
         # Plot episode lengths
-        axes[1, 1].plot(episodes, self.episode_lengths, alpha=0.3, label='Raw', linewidth=0.5)
+        axes[1, 1].plot(episodes, self.episode_lengths, label='Raw', linewidth=2, color='orange')
         if len(self.episode_lengths) >= window_size:
             moving_avg = self._moving_average(self.episode_lengths, window_size)
-            axes[1, 1].plot(episodes[window_size-1:], moving_avg, label=f'MA-{window_size}', linewidth=2)
+            axes[1, 1].plot(episodes[window_size-1:], moving_avg, label=f'MA-{window_size}', linewidth=2, color='blue')
         axes[1, 1].set_xlabel('Episode')
         axes[1, 1].set_ylabel('Steps')
         axes[1, 1].set_title('Episode Length')
@@ -139,7 +140,7 @@ class TrainingMonitor:
         # Plot throughput if available
         if self.throughput_values and any(self.throughput_values):
             axes[2, 0].plot(episodes[:len(self.throughput_values)], self.throughput_values, 
-                          alpha=0.3, label='Raw', linewidth=0.5)
+                                label='Raw', linewidth=2, color='orange')
             if len(self.throughput_values) >= window_size:
                 moving_avg = self._moving_average(self.throughput_values, window_size)
                 axes[2, 0].plot(episodes[window_size-1:len(self.throughput_values)], moving_avg, 
@@ -153,23 +154,62 @@ class TrainingMonitor:
             axes[2, 0].text(0.5, 0.5, 'No throughput data', 
                           ha='center', va='center', transform=axes[2, 0].transAxes)
             axes[2, 0].set_title('Network Throughput (No Data)')
-        
-        # Plot reward distribution (histogram)
-        if len(self.episode_rewards) > 10:
-            axes[2, 1].hist(self.episode_rewards, bins=30, alpha=0.7, edgecolor='black')
-            axes[2, 1].axvline(np.mean(self.episode_rewards), color='r', 
-                             linestyle='--', linewidth=2, label=f'Mean: {np.mean(self.episode_rewards):.2f}')
-            axes[2, 1].set_xlabel('Reward')
-            axes[2, 1].set_ylabel('Frequency')
-            axes[2, 1].set_title('Reward Distribution')
-            axes[2, 1].legend()
-            axes[2, 1].grid(True, alpha=0.3)
+        # Plot RTT if available
+        if self.rtt_values and any(self.rtt_values):
+            axes[3, 0].plot(
+                episodes[:len(self.rtt_values)],
+                self.rtt_values,
+                label='Raw',
+                linewidth=2, color='blue'
+            )
+            if len(self.rtt_values) >= window_size:
+                moving_avg = self._moving_average(self.rtt_values, window_size)
+                axes[3, 0].plot(
+                    episodes[window_size-1:len(self.rtt_values)],
+                    moving_avg,
+                    label=f'MA-{window_size}',
+                    linewidth=2, color='green'
+                )
+            axes[3, 0].set_xlabel('Episode')
+            axes[3, 0].set_ylabel('RTT (s)')
+            axes[3, 0].set_title('Round-Trip Time (RTT)')
+            axes[3, 0].legend()
+            axes[3, 0].grid(True, alpha=0.3)
         else:
-            axes[2, 1].text(0.5, 0.5, 'Not enough data', 
-                          ha='center', va='center', transform=axes[2, 1].transAxes)
+            axes[3, 0].text(0.5, 0.5, 'No RTT data',
+                    ha='center', va='center', transform=axes[3, 0].transAxes)
+
+
         
+
+        
+        # Plot CWND if available
+        if self.cwnd_values and any(self.cwnd_values):
+            axes[3, 1].plot(
+                episodes[:len(self.cwnd_values)],
+                self.cwnd_values,
+                alpha=0.3,
+                label='Raw',
+                linewidth=2, color='red'
+            )
+            if len(self.cwnd_values) >= window_size:
+                moving_avg = self._moving_average(self.cwnd_values, window_size)
+                axes[3, 1].plot(
+                    episodes[window_size-1:len(self.cwnd_values)],
+                    moving_avg,
+                    label=f'MA-{window_size}',
+                    linewidth=2
+                )
+            axes[3, 1].set_xlabel('Episode')
+            axes[3, 1].set_ylabel('CWND')
+            axes[3, 1].set_title('Congestion Window (CWND)')
+            axes[3, 1].legend()
+            axes[3, 1].grid(True, alpha=0.3)
+        else:
+            axes[3, 1].text(0.5, 0.5, 'No CWND data',
+                            ha='center', va='center', transform=axes[3, 1].transAxes)
+
         plt.tight_layout()
-        
         # Save figure
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         plot_path = os.path.join(self.log_dir, f'training_progress_{timestamp}.png')

@@ -91,7 +91,8 @@ class DQNAgent:
         self.learning_rate = 0.001  # Learning rate
         self.batch_size = 64        # Batch size for training
         self.target_update = 10     # Update target network every N episodes
-        
+        self.alpha = 0.1            # Entropy temperature (Soft Bellman)
+        self.sigma = 0.05           # Brownian diffusion coefficient
         # Networks
         self.policy_net = DQNNetwork(state_size, action_size).to(device)
         self.target_net = DQNNetwork(state_size, action_size).to(device)
@@ -138,10 +139,25 @@ class DQNAgent:
         current_q = self.policy_net(states).gather(1, actions.unsqueeze(1))
         
         # Next Q values from target network
+        # with torch.no_grad():
+        #     next_q = self.target_net(next_states).max(1)[0]
+        #     target_q = rewards + (1 - dones) * self.gamma * next_q
         with torch.no_grad():
-            next_q = self.target_net(next_states).max(1)[0]
-            target_q = rewards + (1 - dones) * self.gamma * next_q
-        
+            next_q_values = self.target_net(next_states)
+            
+            # 1. Soft Value (Entropy-regularized value)
+            # Log-Sum-Exp provides a smooth approximation of the maximum
+            soft_value = self.alpha * torch.logsumexp(next_q_values / self.alpha, dim=1)
+            
+            # 2. Brownian Movement (Diffusion term)
+            # Adds stochastic noise representing the "random walk" of network jitter
+            brownian_increment = self.sigma * torch.randn_like(soft_value)
+            
+            # 3. Target Q calculation
+            target_q = rewards + (1 - dones) * self.gamma * (soft_value + brownian_increment)
+
+
+
         # Compute loss
         loss = self.criterion(current_q.squeeze(), target_q)
         
@@ -189,7 +205,7 @@ class DQNAgent:
         print(f"Model loaded from {filepath}")
 
 
-def train_dqn(env, agent, num_episodes=1000, max_steps=500, monitor=None):
+def train_dqn(env, agent, num_episodes=1000, max_steps=1000, monitor=None):
     """
     Training loop for DQN agent
     """
@@ -333,7 +349,7 @@ def test_dqn(env, agent, num_episodes=10):
             done = False
             step = 0
             
-            while not done and step < 500:
+            while not done and step < 1000:
                 # Select action without exploration
                 action = agent.select_action(state, training=False)
                 next_state, reward, done, info = env.step(action)
@@ -367,7 +383,7 @@ def main():
     parser.add_argument('--save', type=str, default='dqn_tcp_final.pth', help='Save model to file')
     parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'cuda'], 
                         help='Device to use for training')
-    parser.add_argument('--max-steps', type=int, default=500, help='Max steps per episode')
+    parser.add_argument('--max-steps', type=int, default=1000, help='Max steps per episode')
     parser.add_argument('--log-dir', type=str, default='./logs', help='Directory for logs and plots')
     parser.add_argument('--no-monitor', action='store_true', help='Disable training monitoring')
     args = parser.parse_args()
