@@ -1,8 +1,10 @@
 /*
-TCP CONGESTION ALGORITHMS WITH OPENGYM INTEGRATION
-By MOSAFER
-
-             Network Topology
+ * Copyright (c) 2025 MOSAFER
+ * Licensed under the MIT License
+ TCP CONGESTION ALGORITHMS WITH OPENGYM INTEGRATION
+ By MOSAFER
+ 
+            Network Topology
 
  N0----                            ----N5
        |          (p2p)           |
