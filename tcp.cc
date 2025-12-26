@@ -1,14 +1,6 @@
-
 /*
-
-TCP CONGESTION ALGORITHMS
-By
- __  __   ___   ____      _     _____  _____  ____
-|  \/  | / _ \ / ___|    / \   |  ___|| ____||  _ \
-| |\/| || | | |\___ \   / _ \  | |_   |  _|  | |_) |
-| |  | || |_| | ___) | / ___ \ |  _|  | |___ |  _ <
-|_|  |_| \___/ |____/ /_/   \_\|_|    |_____||_| \_\
-
+TCP CONGESTION ALGORITHMS WITH OPENGYM INTEGRATION
+By MOSAFER
 
              Network Topology
 
@@ -17,7 +9,6 @@ By
  N1---------N3 <--------> N4-----------N6
        |                          |
  N2----                            ----N7
-
 */
 
 #include <fstream>
@@ -31,16 +22,16 @@ By
 #include "ns3/ipv4-global-routing-helper.h"
 #include "ns3/netanim-module.h"
 #include "ns3/opengym-module.h"
+#include "ns3/tcp-socket-base.h"
+#include "ns3/tcp-westwood-plus.h"
 
 using namespace ns3;
 
-
-NS_LOG_COMPONENT_DEFINE ("Assignment");
+NS_LOG_COMPONENT_DEFINE ("TcpOpenGymExample");
 
 class MyApp : public Application
 {
 public:
-
   MyApp ();
   virtual ~MyApp();
 
@@ -155,8 +146,8 @@ CwndChange (uint32_t oldCwnd, uint32_t newCwnd)
 void
 IncRate (Ptr<MyApp> app, DataRate rate)
 {
-	app->ChangeRate(rate);
-    return;
+  app->ChangeRate(rate);
+  return;
 }
 
 // ============================================================================
@@ -187,8 +178,8 @@ public:
   void ScheduleNextStateRead();
   void SetCwnd(uint32_t oldCwnd, uint32_t newCwnd);
   void SetRtt(Time oldRtt, Time newRtt);
-  void SetThroughput(double throughput);
-  void SetPacketLoss(uint32_t lostPackets);
+  void UpdateThroughput();
+  void SetSink(Ptr<PacketSink> sink);
 
 private:
   void GetCurrentState();
@@ -209,6 +200,11 @@ private:
   uint32_t m_totalPacketsSent;
   uint32_t m_totalPacketsReceived;
 
+  // For throughput calculation
+  Ptr<PacketSink> m_sink;
+  uint64_t m_lastTotalRx;
+  Time m_lastUpdateTime;
+
   // RL state tracking
   bool m_gameOver;
   double m_reward;
@@ -220,16 +216,20 @@ TcpOpenGymEnv::TcpOpenGymEnv ()
   NS_LOG_FUNCTION (this);
   m_simSeed = 1;
   m_simulationTime = 50.0;
-  m_envStepTime = 0.1; // Take RL action every 0.1 seconds
+  m_envStepTime = 0.1;
   m_openGymPort = 5555;
   m_gameOver = false;
   m_currentCwnd = 0;
   m_previousCwnd = 0;
+  m_currentRtt = Seconds(0);
+  m_previousRtt = Seconds(0);
   m_throughput = 0.0;
   m_packetLoss = 0;
   m_totalPacketsSent = 0;
   m_totalPacketsReceived = 0;
   m_reward = 0.0;
+  m_lastTotalRx = 0;
+  m_lastUpdateTime = Seconds(0);
 }
 
 TcpOpenGymEnv::TcpOpenGymEnv (uint32_t simSeed, double simulationTime, uint32_t openGymPort, double envStepTime)
@@ -242,11 +242,15 @@ TcpOpenGymEnv::TcpOpenGymEnv (uint32_t simSeed, double simulationTime, uint32_t 
   m_gameOver = false;
   m_currentCwnd = 0;
   m_previousCwnd = 0;
+  m_currentRtt = Seconds(0);
+  m_previousRtt = Seconds(0);
   m_throughput = 0.0;
   m_packetLoss = 0;
   m_totalPacketsSent = 0;
   m_totalPacketsReceived = 0;
   m_reward = 0.0;
+  m_lastTotalRx = 0;
+  m_lastUpdateTime = Seconds(0);
 }
 
 TcpOpenGymEnv::~TcpOpenGymEnv ()
@@ -342,7 +346,7 @@ TcpOpenGymEnv::GetObservation()
   }
   
   // CWND change rate
-  float cwndChangeRate = 0.0f;
+  float cwndChangeRate = 0.5f; // Default to 0.5 (no change)
   if (m_previousCwnd > 0) {
     cwndChangeRate = std::min(1.0f, std::max(-1.0f, 
       (float)(m_currentCwnd - m_previousCwnd) / (float)m_previousCwnd));
@@ -355,7 +359,8 @@ TcpOpenGymEnv::GetObservation()
   box->AddValue(lossRate);
   box->AddValue(cwndChangeRate);
 
-  NS_LOG_UNCOND ("MyGetObservation: " << box);
+  NS_LOG_UNCOND ("MyGetObservation: [" << normCwnd << ", " << normRtt << ", " 
+                 << normThroughput << ", " << lossRate << ", " << cwndChangeRate << "]");
   return box;
 }
 
@@ -367,7 +372,7 @@ TcpOpenGymEnv::GetReward()
   
   float reward = 0.0f;
   
-  // Positive reward for throughput (Mbps)
+  // Positive reward for throughput (in Mbps)
   reward += m_throughput / 1000000.0f;
   
   // Penalty for packet loss
@@ -377,10 +382,11 @@ TcpOpenGymEnv::GetReward()
   }
   reward -= lossRate * 10.0f; // Heavy penalty for packet loss
   
-  // Penalty for high RTT
+  // Penalty for high RTT (in seconds)
   reward -= m_currentRtt.GetSeconds() * 2.0f;
   
-  NS_LOG_UNCOND ("MyGetReward: " << reward);
+  NS_LOG_UNCOND ("MyGetReward: " << reward << " (throughput=" << m_throughput/1000000.0f 
+                 << " Mbps, rtt=" << m_currentRtt.GetSeconds() << " s, loss_rate=" << lossRate << ")");
   return reward;
 }
 
@@ -389,7 +395,7 @@ TcpOpenGymEnv::GetExtraInfo()
 {
   std::string myInfo = "cwnd=" + std::to_string(m_currentCwnd) + 
                        ", rtt=" + std::to_string(m_currentRtt.GetSeconds()) +
-                       ", throughput=" + std::to_string(m_throughput) +
+                       ", throughput=" + std::to_string(m_throughput/1000000.0f) + " Mbps" +
                        ", loss=" + std::to_string(m_packetLoss);
   NS_LOG_UNCOND("MyGetExtraInfo: " << myInfo);
   return myInfo;
@@ -403,9 +409,11 @@ TcpOpenGymEnv::ExecuteActions(Ptr<OpenGymDataContainer> action)
   
   NS_LOG_UNCOND ("ExecuteActions: " << actionValue);
   
-  // Actions will be applied to modify the sending rate
-  // This would typically modify application sending rate or TCP parameters
-  // The actual implementation depends on how you want to control the network
+  // Note: Directly modifying TCP CWND is complex and may not work as expected
+  // The actions here serve as a signal but TCP's own congestion control
+  // algorithm will ultimately control the CWND
+  // For a real implementation, you would need to create a custom TCP variant
+  // that respects these RL actions
   
   // Schedule next state observation
   ScheduleNextStateRead();
@@ -424,6 +432,9 @@ TcpOpenGymEnv::GetCurrentState()
 {
   NS_LOG_FUNCTION (this);
   
+  // Update throughput before notifying
+  UpdateThroughput();
+  
   // Notify OpenGym that new state is ready
   Notify();
 }
@@ -433,6 +444,7 @@ TcpOpenGymEnv::SetCwnd(uint32_t oldCwnd, uint32_t newCwnd)
 {
   m_previousCwnd = m_currentCwnd;
   m_currentCwnd = newCwnd;
+  NS_LOG_INFO("CWND updated: " << oldCwnd << " -> " << newCwnd);
 }
 
 void
@@ -440,18 +452,50 @@ TcpOpenGymEnv::SetRtt(Time oldRtt, Time newRtt)
 {
   m_previousRtt = m_currentRtt;
   m_currentRtt = newRtt;
+  NS_LOG_INFO("RTT updated: " << oldRtt.GetSeconds() << " -> " << newRtt.GetSeconds());
 }
 
 void
-TcpOpenGymEnv::SetThroughput(double throughput)
+TcpOpenGymEnv::UpdateThroughput()
 {
-  m_throughput = throughput;
+  if (m_sink)
+  {
+    uint64_t totalRx = m_sink->GetTotalRx();
+    Time now = Simulator::Now();
+    
+    if (m_lastUpdateTime > Seconds(0))
+    {
+      double timeDiff = (now - m_lastUpdateTime).GetSeconds();
+      if (timeDiff > 0)
+      {
+        m_throughput = (totalRx - m_lastTotalRx) * 8.0 / timeDiff; // bits per second
+        NS_LOG_INFO("Throughput: " << m_throughput / 1000000.0 << " Mbps");
+      }
+    }
+    
+    m_lastTotalRx = totalRx;
+    m_lastUpdateTime = now;
+  }
 }
 
 void
-TcpOpenGymEnv::SetPacketLoss(uint32_t lostPackets)
+TcpOpenGymEnv::SetSink(Ptr<PacketSink> sink)
 {
-  m_packetLoss = lostPackets;
+  m_sink = sink;
+  NS_LOG_INFO("PacketSink attached to OpenGym environment");
+}
+
+// Callback functions for tracing - INSIDE ns3 namespace
+static void
+CwndTracer (Ptr<TcpOpenGymEnv> env, uint32_t oldCwnd, uint32_t newCwnd)
+{
+  env->SetCwnd(oldCwnd, newCwnd);
+}
+
+static void
+RttTracer (Ptr<TcpOpenGymEnv> env, Time oldRtt, Time newRtt)
+{
+  env->SetRtt(oldRtt, newRtt);
 }
 
 } // namespace ns3
@@ -460,29 +504,20 @@ TcpOpenGymEnv::SetPacketLoss(uint32_t lostPackets)
 // End of OpenGym Environment
 // ============================================================================
 
-
 int main (int argc, char* argv[])
 {
-
   std::string lat = "2ms";
-  std::string rate = "5Mbps";		 // P2P link
-  std::string rate1="2Mbps"; 		// for Node 3 to 4
-  std::string tcpVariant="TcpVegas";
+  std::string rate = "5Mbps";     // P2P link
+  std::string rate1="2Mbps";      // for Node 3 to 4
+  std::string tcpVariant="TcpNewReno";
   bool enableFlowMonitor = false;
   
   // OpenGym parameters
-  bool openGymEnabled = true;
+  bool openGymEnabled = false;
   uint32_t openGymPort = 5555;
   double envStepTime = 0.1; // RL agent decision interval
   uint32_t simSeed = 1;
   double simTime = 50.0;
-
-  //*********************************************************************************************
-  //********************** Specifying  TCP Congestion control Algorithm. ************************
-  //  Call any TCP type via Command line instead of changing the source
-  // ./ns3 run "program" -tcpVariant=Tcpvegas"
-  //********************************************************************************************
-
 
   CommandLine cmd;
   cmd.AddValue ("latency", "P2P link Latency in seconds", lat);
@@ -491,7 +526,7 @@ int main (int argc, char* argv[])
   cmd.AddValue("tcpVariant",
                  "Transport protocol to use: TcpNewReno, "
                  "TcpHybla, TcpHighSpeed, TcpHtcp, TcpVegas, TcpScalable, TcpVeno, "
-                 "TcpBic,TcpCubic, TcpYeah, TcpIllinois, TcpWestwood, TcpWestwoodPlus, TcpLedbat ",
+                 "TcpBic, TcpCubic, TcpYeah, TcpIllinois, TcpWestwoodPlus, TcpWestwoodPlusPlus, TcpLedbat ",
                  tcpVariant);
   cmd.AddValue ("openGym", "Enable OpenGym for RL", openGymEnabled);
   cmd.AddValue ("openGymPort", "Port number for OpenGym", openGymPort);
@@ -500,74 +535,28 @@ int main (int argc, char* argv[])
   cmd.AddValue ("simTime", "Total simulation time", simTime);
   cmd.Parse (argc, argv);
 
+  // Set random seed for reproducibility
+  RngSeedManager::SetSeed(simSeed);
 
-
-  //Config::SetDefault("ns3::TcpL4Protocol::SocketType", TypeIdValue(TcpCubic::GetTypeId()));
-  //Config::SetDefault("ns3::TcpL4Protocol::SocketType", TypeIdValue(TcpVegas::GetTypeId()));
-
-
-    cmd.Parse(argc, argv);
-
-    // Set random seed for reproducibility
-    RngSeedManager::SetSeed(simSeed);
-
-    tcpVariant = std::string("ns3::") + tcpVariant;
-    // Select TCP variant
-    if (tcpVariant == "ns3::TcpWestwoodPlus")
-    {
-        // TcpWestwoodPlus is not an actual TypeId name; we need TcpWestwood here
-        Config::SetDefault("ns3::TcpL4Protocol::SocketType", TypeIdValue(TcpWestwood::GetTypeId()));
-        // the default protocol type in ns3::TcpWestwood is WESTWOOD
-        Config::SetDefault("ns3::TcpWestwood::ProtocolType", EnumValue(TcpWestwood::WESTWOODPLUS));
-    }
-    else
-    {
-        TypeId tcpTid;
-        NS_ABORT_MSG_UNLESS(TypeId::LookupByNameFailSafe(tcpVariant, &tcpTid),
-                            "TypeId " << tcpVariant << " not found");
-        Config::SetDefault("ns3::TcpL4Protocol::SocketType",
-                           TypeIdValue(TypeId::LookupByName(tcpVariant)));
-    }
-
-
-
-/// ***************************Implementation of Classic Main function
-/*
-int main ()
-{
-
-  std::string protocol = "TcpNewReno";
-  std::string lat = "2ms";
-  std::string rate = "5Mbps";		 // P2P link
-  std::string rate1="2Mbps"; 		// for Node 3 to 4
-  bool enableFlowMonitor = false;
-
-
-  if (protocol == "TcpNewReno")
-   Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));
+  tcpVariant = std::string("ns3::") + tcpVariant;
+  
+  // Select TCP variant
+  if (tcpVariant == "ns3::TcpWestwoodPlusPlus")
+  {
+    Config::SetDefault("ns3::TcpL4Protocol::SocketType", TypeIdValue(TcpWestwoodPlus::GetTypeId()));
+//     Config::SetDefault("ns3::TcpWestwoodPlus::ProtocolType", EnumValue(TcpWestwoodPlus::WESTWOODPLUS));
+  }
   else
-    Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpVeno"));
-
-//Config::SetDefault("ns3::TcpL4Protocol::SocketType", TypeIdValue (TcpTahoe::GetTypeId()));
-
-
-  CommandLine cmd;
-  cmd.AddValue ("latency", "P2P link Latency in miliseconds", lat);
-  cmd.AddValue ("rate", "P2P data rate in bps", rate);
-  cmd.AddValue ("EnableMonitor", "Enable Flow Monitor", enableFlowMonitor);
-
-  //cmd.Parse (argc, argv);
-
-
-//Sets the default congestion control algorithm
-  //Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpTahoe"));
-
-*/
-
-//***************** Nodes Creation required by the topology as Shown above********************
+  {
+    TypeId tcpTid;
+    NS_ABORT_MSG_UNLESS(TypeId::LookupByNameFailSafe(tcpVariant, &tcpTid),
+                        "TypeId " << tcpVariant << " not found");
+    Config::SetDefault("ns3::TcpL4Protocol::SocketType",
+                       TypeIdValue(TypeId::LookupByName(tcpVariant)));
+  }
 
   NS_LOG_INFO ("Create nodes.");
-  NodeContainer c; // ALL Nodes
+  NodeContainer c;
   c.Create(8);
 
   NodeContainer n0n3 = NodeContainer (c.Get (0), c.Get (3));
@@ -581,24 +570,25 @@ int main ()
   // OpenGym Environment Setup
   Ptr<TcpOpenGymEnv> openGymEnv = nullptr;
   if (openGymEnabled)
-    {
-      NS_LOG_UNCOND("Initializing OpenGym environment...");
-      openGymEnv = CreateObject<TcpOpenGymEnv> (simSeed, simTime, openGymPort, envStepTime);
-      openGymEnv->SetOpenGymInterface(OpenGymInterface::Get(openGymPort));
-      NS_LOG_UNCOND("OpenGym interface ready. Connect Python RL agent to port " << openGymPort);
-    }
+  {
+    NS_LOG_UNCOND("=================================================");
+    NS_LOG_UNCOND("Initializing OpenGym environment...");
+    NS_LOG_UNCOND("=================================================");
+    openGymEnv = CreateObject<TcpOpenGymEnv> (simSeed, simTime, openGymPort, envStepTime);
+    openGymEnv->SetOpenGymInterface(OpenGymInterface::Get(openGymPort));
+    NS_LOG_UNCOND("OpenGym interface ready on port " << openGymPort);
+    NS_LOG_UNCOND("Waiting for Python RL agent to connect...");
+    NS_LOG_UNCOND("Run: python3 dqn_agent.py --port " << openGymPort);
+    NS_LOG_UNCOND("=================================================");
+  }
 
-
-
-//************************ Install Internet Stack*********************************
-
+  // Install Internet Stack
   InternetStackHelper internet;
   internet.Install (c);
 
-//**************** channels Creation without IP addressing*************************
-
+  // Create channels
   NS_LOG_INFO ("Create channels.");
-  PointToPointHelper p2p,p2p_for3_4;
+  PointToPointHelper p2p, p2p_for3_4;
   p2p.SetDeviceAttribute ("DataRate", StringValue (rate));
   p2p.SetChannelAttribute ("Delay", StringValue (lat));
   NetDeviceContainer d0d3 = p2p.Install (n0n3);
@@ -608,15 +598,12 @@ int main ()
   NetDeviceContainer d6d4 = p2p.Install (n6n4);
   NetDeviceContainer d7d4 = p2p.Install (n7n4);
 
-  p2p_for3_4.SetDeviceAttribute ("DataRate", StringValue (rate1)); // for Node 3 to 5 data rate is 2Mbps
+  p2p_for3_4.SetDeviceAttribute ("DataRate", StringValue (rate1));
   p2p_for3_4.SetChannelAttribute ("Delay", StringValue (lat));
   NetDeviceContainer d3d4 = p2p_for3_4.Install (n3n4);
 
-
-//*********************IP addresses Setup******************************************
-
+  // Assign IP Addresses
   NS_LOG_INFO ("Assign IP Addresses.");
-
   Ipv4AddressHelper ipv4;
   ipv4.SetBase ("10.1.1.0", "255.255.255.0");
   Ipv4InterfaceContainer i0i3 = ipv4.Assign (d0d3);
@@ -639,153 +626,135 @@ int main ()
   ipv4.SetBase ("10.1.7.0", "255.255.255.0");
   Ipv4InterfaceContainer i7i4 = ipv4.Assign (d7d4);
 
-   NS_LOG_INFO ("Enable static global routing.");
-
-
-  //***************** Turn on global static routing for routing across the network******************
-
+  NS_LOG_INFO ("Enable static global routing.");
   Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
+  
   NS_LOG_INFO ("Create Applications.");
 
-
-
-  //************** TCP connection from N0 to N5**********************************************
-
+  // TCP connection from N0 to N5
   uint16_t sinkPort = 8080;
-  Address sinkAddress (InetSocketAddress (i5i4.GetAddress (0), sinkPort)); // interface of n5
+  Address sinkAddress (InetSocketAddress (i5i4.GetAddress (0), sinkPort));
   PacketSinkHelper packetSinkHelper ("ns3::TcpSocketFactory", InetSocketAddress (Ipv4Address::GetAny (), sinkPort));
-  ApplicationContainer sinkApps = packetSinkHelper.Install (c.Get (5)); //n5 as sink
+  ApplicationContainer sinkApps = packetSinkHelper.Install (c.Get (5));
   sinkApps.Start (Seconds (2.));
-  //sinkApps.Stop (Seconds (25.));
 
+  Ptr<Socket> ns3TcpSocket = Socket::CreateSocket (c.Get (0), TcpSocketFactory::GetTypeId ());
 
-  //Ptr<Socket> ns3TcpSocket1 = Socket::CreateSocket (c.Get (0), tid); //source at n0
-  Ptr<Socket> ns3TcpSocket = Socket::CreateSocket (c.Get (0), TcpSocketFactory::GetTypeId ()); //source at n0
-
-  //********************* Congestion window ******************************
-
-  // Modified callback to update OpenGym environment
+  // Connect traces to OpenGym environment
   if (openGymEnabled && openGymEnv)
-    {
-      ns3TcpSocket->TraceConnectWithoutContext ("CongestionWindow", 
-        MakeBoundCallback (&TcpOpenGymEnv::SetCwnd, openGymEnv));
-    }
+  {
+    // Attach PacketSink for throughput monitoring
+    Ptr<PacketSink> sink = DynamicCast<PacketSink>(sinkApps.Get(0));
+    openGymEnv->SetSink(sink);
+    
+    // Trace Congestion Window - using ns3:: prefix for callback
+    ns3TcpSocket->TraceConnectWithoutContext("CongestionWindow", 
+      MakeBoundCallback(&ns3::CwndTracer, openGymEnv));
+    
+    // Trace RTT - using ns3:: prefix for callback
+    ns3TcpSocket->TraceConnectWithoutContext("RTT", 
+      MakeBoundCallback(&ns3::RttTracer, openGymEnv));
+      
+    NS_LOG_UNCOND("Traces connected for N0->N5 flow");
+  }
   else
-    {
-      ns3TcpSocket->TraceConnectWithoutContext ("CongestionWindow", MakeCallback (&CwndChange));
-    }
+  {
+    ns3TcpSocket->TraceConnectWithoutContext("CongestionWindow", MakeCallback(&CwndChange));
+  }
 
-  //*********************TCP application at N0*******************************
-
+  // TCP application at N0
   Ptr<MyApp> app = CreateObject<MyApp> ();
   app->Setup (ns3TcpSocket, sinkAddress, 1040, 100000, DataRate ("1Mbps"));
   c.Get (0)->AddApplication (app);
   app->SetStartTime (Seconds (2.));
-  //app->SetStopTime (Seconds (25.)); // you can change this value if you want limits the duration of running apps
 
-
-
-  //*************************** TCP connection from N1 to N6***********************
+  // TCP connection from N1 to N6
   uint16_t sinkPort2 = 8081;
- // std::ostringstream tcpModel;
-  Address sinkAddress2 (InetSocketAddress (i6i4.GetAddress (1), sinkPort2)); // interface of n6
+  Address sinkAddress2 (InetSocketAddress (i6i4.GetAddress (1), sinkPort2));
   PacketSinkHelper packetSinkHelper2 ("ns3::TcpSocketFactory", InetSocketAddress (Ipv4Address::GetAny (), sinkPort2));
-  ApplicationContainer sinkApps2 = packetSinkHelper2.Install (c.Get (6)); //n6 as sink
+  ApplicationContainer sinkApps2 = packetSinkHelper2.Install (c.Get (6));
   sinkApps2.Start (Seconds (5.));
-   // sinkApps2.Stop (Seconds (6.));
 
-  Ptr<Socket> ns3TcpSocket2 = Socket::CreateSocket (c.Get (1), TcpSocketFactory::GetTypeId ()); //source at n1
+  Ptr<Socket> ns3TcpSocket2 = Socket::CreateSocket (c.Get (1), TcpSocketFactory::GetTypeId ());
 
-  //*********************** Congestion window for N1 to N6 *************
-
+  // Connect traces for second connection
   if (openGymEnabled && openGymEnv)
-    {
-      ns3TcpSocket2->TraceConnectWithoutContext ("CongestionWindow", 
-        MakeBoundCallback (&TcpOpenGymEnv::SetCwnd, openGymEnv));
-    }
+  {
+    ns3TcpSocket2->TraceConnectWithoutContext("CongestionWindow", 
+      MakeBoundCallback(&ns3::CwndTracer, openGymEnv));
+    
+    ns3TcpSocket2->TraceConnectWithoutContext("RTT", 
+      MakeBoundCallback(&ns3::RttTracer, openGymEnv));
+      
+    NS_LOG_UNCOND("Traces connected for N1->N6 flow");
+  }
   else
-    {
-      ns3TcpSocket2->TraceConnectWithoutContext ("CongestionWindow", MakeCallback (&CwndChange));
-    }
+  {
+    ns3TcpSocket2->TraceConnectWithoutContext("CongestionWindow", MakeCallback(&CwndChange));
+  }
 
-  // **************************Create TCP application at N1 ******************
-
+  // Create TCP application at N1
   Ptr<MyApp> app2 = CreateObject<MyApp> ();
   app2->Setup (ns3TcpSocket2, sinkAddress2, 1040, 100000, DataRate ("1Mbps"));
   c.Get (1)->AddApplication (app2);
   app2->SetStartTime (Seconds (5.));
-  //app2->SetStopTime (Seconds (6.));
 
-
-  // *********************UDP connection from N2 to N7 ****************************
-
+  // UDP connection from N2 to N7
   uint16_t sinkPort3 = 6;
-  Address sinkAddress3 (InetSocketAddress (i7i4.GetAddress (0), sinkPort3)); // interface of n7
+  Address sinkAddress3 (InetSocketAddress (i7i4.GetAddress (0), sinkPort3));
   PacketSinkHelper packetSinkHelper3 ("ns3::UdpSocketFactory", InetSocketAddress (Ipv4Address::GetAny (), sinkPort3));
-  ApplicationContainer sinkApps3 = packetSinkHelper3.Install (c.Get (7)); //n7 as sink
+  ApplicationContainer sinkApps3 = packetSinkHelper3.Install (c.Get (7));
   sinkApps3.Start (Seconds (10.));
   sinkApps3.Stop (Seconds (17.));
 
-  Ptr<Socket> ns3UdpSocket = Socket::CreateSocket (c.Get (2), UdpSocketFactory::GetTypeId ()); //source at n2
+  Ptr<Socket> ns3UdpSocket = Socket::CreateSocket (c.Get (2), UdpSocketFactory::GetTypeId ());
 
-  // ***************************Create UDP application at N2 ***********************
-
+  // Create UDP application at N2
   Ptr<MyApp> app3 = CreateObject<MyApp> ();
   app3->Setup (ns3UdpSocket, sinkAddress3, 1040, 100000, DataRate ("1Mbps"));
   c.Get (2)->AddApplication (app3);
   app3->SetStartTime (Seconds (10.));
   app3->SetStopTime (Seconds (17.));
 
-  //ns3UdpSocket->TraceConnectWithoutContext ("CongestionWindow", MakeCallback (&CwndChange));
-
-
-
- // **********************************Increase UDP Rate ******************************
-
- // Simulator::Schedule (Seconds(20.0), &IncRate, app3, DataRate("2Mbps"));
-
   // Flow Monitor
   Ptr<FlowMonitor> flowmon;
   if (enableFlowMonitor)
-    {
-      FlowMonitorHelper flowmonHelper;
-      flowmon = flowmonHelper.InstallAll ();
-    }
-
-
-
-//
-// actual simulation.
-//
+  {
+    FlowMonitorHelper flowmonHelper;
+    flowmon = flowmonHelper.InstallAll ();
+  }
 
   NS_LOG_INFO ("Run Simulation.");
   Simulator::Stop (Seconds(simTime));
 
-   //Enabling Pcap Tracing
-   //p2p.EnablePcapAll("scratch/Assignment");
-
   // Start OpenGym state collection
   if (openGymEnabled && openGymEnv)
-    {
-      Simulator::Schedule (Seconds(envStepTime), &TcpOpenGymEnv::ScheduleNextStateRead, openGymEnv);
-    }
+  {
+    Simulator::Schedule (Seconds(envStepTime), &TcpOpenGymEnv::ScheduleNextStateRead, openGymEnv);
+    NS_LOG_UNCOND("OpenGym state collection scheduled");
+  }
 
+  // NetAnim
   AnimationInterface anim("Assignment.xml");
-  anim.SetConstantPosition(c.Get(0),0.0,0.0);
-  anim.SetConstantPosition(c.Get(1),0.0,2.0);
-  anim.SetConstantPosition(c.Get(2),0.0,4.0);
-  anim.SetConstantPosition(c.Get(3),2.0,2.0);
-  anim.SetConstantPosition(c.Get(4),4.0,2.0);
-  anim.SetConstantPosition(c.Get(5),6.0,0.0);
-  anim.SetConstantPosition(c.Get(6),6.0,2.0);
-  anim.SetConstantPosition(c.Get(7),6.0,4.0);
+  anim.SetConstantPosition(c.Get(0), 0.0, 0.0);
+  anim.SetConstantPosition(c.Get(1), 0.0, 2.0);
+  anim.SetConstantPosition(c.Get(2), 0.0, 4.0);
+  anim.SetConstantPosition(c.Get(3), 2.0, 2.0);
+  anim.SetConstantPosition(c.Get(4), 4.0, 2.0);
+  anim.SetConstantPosition(c.Get(5), 6.0, 0.0);
+  anim.SetConstantPosition(c.Get(6), 6.0, 2.0);
+  anim.SetConstantPosition(c.Get(7), 6.0, 4.0);
 
   Simulator::Run ();
+  
   if (enableFlowMonitor)
-    {
-	  flowmon->CheckForLostPackets ();
-	  flowmon->SerializeToXmlFile("Assignment.flowmon", true, true);
-    }
+  {
+    flowmon->CheckForLostPackets ();
+    flowmon->SerializeToXmlFile("Assignment.flowmon", true, true);
+  }
+  
   Simulator::Destroy ();
   NS_LOG_INFO ("Done.");
+  
+  return 0;
 }

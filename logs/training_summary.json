@@ -1,0 +1,12 @@
+{
+  "total_episodes": 1,
+  "final_epsilon": 0.995,
+  "rewards": {
+    "mean": 431.38863825798035,
+    "std": 0.0,
+    "min": 431.38863825798035,
+    "max": 431.38863825798035
+  },
+  "last_100_reward_mean": null,
+  "timestamp": "2025-12-26T03:25:23.464503"
+}
