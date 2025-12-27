@@ -81,6 +81,17 @@ class TrainingMonitor:
         except:
             pass
         return 0.0
+    def smooth(self, y, box_pts=6):
+        """Apply moving average smoothing"""
+        y = np.array(y)  # Ensure it's a numpy array
+        
+        # If data is too short, return as-is
+        if len(y) < box_pts:
+            return y
+        
+        box = np.ones(box_pts) / box_pts
+        y_smooth = np.convolve(y, box, mode='same')
+        return y_smooth
     
     def plot_training_progress(self, window_size=50, save_only=False):
         """Plot training progress with moving averages"""
@@ -88,15 +99,15 @@ class TrainingMonitor:
             return
         
         #fig, axes = plt.subplots(3, 2, figsize=(16, 12))
-        fig, axes = plt.subplots(4, 2, figsize=(16, 16))
+        fig, axes = plt.subplots(3, 2, figsize=(16, 16))
 
         episodes = np.arange(len(self.episode_rewards))
         
         # Plot rewards
-        axes[0, 0].plot(episodes, self.episode_rewards, label='Raw', linewidth=2, color='orange')
-        if len(self.episode_rewards) >= window_size:
-            moving_avg = self._moving_average(self.episode_rewards, window_size)
-            axes[0, 0].plot(episodes[window_size-1:], moving_avg, label=f'MA-{window_size}', linewidth=2)
+        axes[0, 0].plot(episodes, self.smooth(self.episode_rewards), label='Raw', linewidth=2, color='orange')
+        # if len(self.episode_rewards) >= window_size:
+        #     moving_avg = self._moving_average(self.episode_rewards, window_size)
+        #     axes[0, 0].plot(episodes[window_size-1:], moving_avg, label=f'MA-{window_size}', linewidth=2)
         axes[0, 0].set_xlabel('Episode')
         axes[0, 0].set_ylabel('Total Reward')
         axes[0, 0].set_title('Episode Rewards')
@@ -126,58 +137,58 @@ class TrainingMonitor:
         axes[1, 0].grid(True, alpha=0.3)
         axes[1, 0].set_ylim([0, 1.1])
         
-        # Plot episode lengths
-        axes[1, 1].plot(episodes, self.episode_lengths, label='Raw', linewidth=2, color='orange')
-        if len(self.episode_lengths) >= window_size:
-            moving_avg = self._moving_average(self.episode_lengths, window_size)
-            axes[1, 1].plot(episodes[window_size-1:], moving_avg, label=f'MA-{window_size}', linewidth=2, color='blue')
-        axes[1, 1].set_xlabel('Episode')
-        axes[1, 1].set_ylabel('Steps')
-        axes[1, 1].set_title('Episode Length')
-        axes[1, 1].legend()
-        axes[1, 1].grid(True, alpha=0.3)
+        # # Plot episode lengths
+        # axes[1, 1].plot(episodes, self.episode_lengths, label='Raw', linewidth=2, color='orange')
+        # if len(self.episode_lengths) >= window_size:
+        #     moving_avg = self._moving_average(self.episode_lengths, window_size)
+        #     axes[1, 1].plot(episodes[window_size-1:], moving_avg, label=f'MA-{window_size}', linewidth=2, color='blue')
+        # axes[1, 1].set_xlabel('Episode')
+        # axes[1, 1].set_ylabel('Steps')
+        # axes[1, 1].set_title('Episode Length')
+        # axes[1, 1].legend()
+        # axes[1, 1].grid(True, alpha=0.3)
         
         # Plot throughput if available
         if self.throughput_values and any(self.throughput_values):
-            axes[2, 0].plot(episodes[:len(self.throughput_values)], self.throughput_values, 
+            axes[1, 1].plot(episodes[:len(self.throughput_values)], self.smooth(self.throughput_values), 
                                 label='Raw', linewidth=2, color='orange')
             if len(self.throughput_values) >= window_size:
                 moving_avg = self._moving_average(self.throughput_values, window_size)
-                axes[2, 0].plot(episodes[window_size-1:len(self.throughput_values)], moving_avg, 
+                axes[1, 1].plot(episodes[window_size-1:len(self.throughput_values)], moving_avg, 
                               label=f'MA-{window_size}', linewidth=2)
-            axes[2, 0].set_xlabel('Episode')
-            axes[2, 0].set_ylabel('Throughput (Mbps)')
-            axes[2, 0].set_title('Network Throughput')
-            axes[2, 0].legend()
-            axes[2, 0].grid(True, alpha=0.3)
+            axes[1, 1].set_xlabel('Episode')
+            axes[1, 1].set_ylabel('Throughput (Mbps)')
+            axes[1, 1].set_title('Network Throughput')
+            axes[1, 1].legend()
+            axes[1, 1].grid(True, alpha=0.3)
         else:
-            axes[2, 0].text(0.5, 0.5, 'No throughput data', 
-                          ha='center', va='center', transform=axes[2, 0].transAxes)
-            axes[2, 0].set_title('Network Throughput (No Data)')
+            axes[1, 1].text(0.5, 0.5, 'No throughput data', 
+                          ha='center', va='center', transform=axes[1, 1].transAxes)
+            axes[1, 1].set_title('Network Throughput (No Data)')
         # Plot RTT if available
         if self.rtt_values and any(self.rtt_values):
-            axes[3, 0].plot(
+            axes[2, 0].plot(
                 episodes[:len(self.rtt_values)],
-                self.rtt_values,
+                self.smooth(self.rtt_values),
                 label='Raw',
                 linewidth=2, color='blue'
             )
             if len(self.rtt_values) >= window_size:
                 moving_avg = self._moving_average(self.rtt_values, window_size)
-                axes[3, 0].plot(
+                axes[2, 0].plot(
                     episodes[window_size-1:len(self.rtt_values)],
                     moving_avg,
                     label=f'MA-{window_size}',
                     linewidth=2, color='green'
                 )
-            axes[3, 0].set_xlabel('Episode')
-            axes[3, 0].set_ylabel('RTT (s)')
-            axes[3, 0].set_title('Round-Trip Time (RTT)')
-            axes[3, 0].legend()
-            axes[3, 0].grid(True, alpha=0.3)
+            axes[2, 0].set_xlabel('Episode')
+            axes[2, 0].set_ylabel('RTT (s)')
+            axes[2, 0].set_title('Round-Trip Time (RTT)')
+            axes[2, 0].legend()
+            axes[2, 0].grid(True, alpha=0.3)
         else:
-            axes[3, 0].text(0.5, 0.5, 'No RTT data',
-                    ha='center', va='center', transform=axes[3, 0].transAxes)
+            axes[2, 0].text(0.5, 0.5, 'No RTT data',
+                    ha='center', va='center', transform=axes[2, 0].transAxes)
 
 
         
@@ -185,29 +196,28 @@ class TrainingMonitor:
         
         # Plot CWND if available
         if self.cwnd_values and any(self.cwnd_values):
-            axes[3, 1].plot(
+            axes[2, 1].plot(
                 episodes[:len(self.cwnd_values)],
                 self.cwnd_values,
-                alpha=0.3,
                 label='Raw',
-                linewidth=2, color='red'
+                linewidth=2, color='green'
             )
             if len(self.cwnd_values) >= window_size:
                 moving_avg = self._moving_average(self.cwnd_values, window_size)
-                axes[3, 1].plot(
+                axes[2, 1].plot(
                     episodes[window_size-1:len(self.cwnd_values)],
                     moving_avg,
                     label=f'MA-{window_size}',
                     linewidth=2
                 )
-            axes[3, 1].set_xlabel('Episode')
-            axes[3, 1].set_ylabel('CWND')
-            axes[3, 1].set_title('Congestion Window (CWND)')
-            axes[3, 1].legend()
-            axes[3, 1].grid(True, alpha=0.3)
+            axes[2, 1].set_xlabel('Episode')
+            axes[2, 1].set_ylabel('CWND')
+            axes[2, 1].set_title('Congestion Window (CWND)')
+            axes[2, 1].legend()
+            axes[2, 1].grid(True, alpha=0.3)
         else:
-            axes[3, 1].text(0.5, 0.5, 'No CWND data',
-                            ha='center', va='center', transform=axes[3, 1].transAxes)
+            axes[2, 1].text(0.5, 0.5, 'No CWND data',
+                            ha='center', va='center', transform=axes[2, 1].transAxes)
 
         plt.tight_layout()
         # Save figure

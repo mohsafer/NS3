@@ -15,6 +15,7 @@ import torch.optim as optim
 from collections import deque
 import random
 import time
+from tqdm import tqdm
 
 try:
     from ns3gym import ns3env
@@ -84,15 +85,15 @@ class DQNAgent:
         self.device = device
         
         # Hyperparameters
-        self.gamma = 0.99           # Discount factor
-        self.epsilon = 1.0          # Exploration rate
+        self.gamma = 0.95           # Discount factor 0.99
+        self.epsilon = 1          # Exploration rate
         self.epsilon_min = 0.01     # Minimum exploration rate
-        self.epsilon_decay = 0.995  # Exploration decay rate
-        self.learning_rate = 0.001  # Learning rate
+        self.epsilon_decay = 0.97  # Exploration decay rate
+        self.learning_rate = 0.0005  # Learning rate
         self.batch_size = 64        # Batch size for training
         self.target_update = 10     # Update target network every N episodes
-        self.alpha = 0.1            # Entropy temperature (Soft Bellman)
-        self.sigma = 0.05           # Brownian diffusion coefficient
+        self.alpha = 0.01            # Entropy temperature (Soft Bellman)
+        self.sigma = 0.01           # Brownian diffusion coefficient
         # Networks
         self.policy_net = DQNNetwork(state_size, action_size).to(device)
         self.target_net = DQNNetwork(state_size, action_size).to(device)
@@ -142,20 +143,27 @@ class DQNAgent:
         # with torch.no_grad():
         #     next_q = self.target_net(next_states).max(1)[0]
         #     target_q = rewards + (1 - dones) * self.gamma * next_q
+
+
         with torch.no_grad():
-            next_q_values = self.target_net(next_states)
-            
+
+            best_actions = self.policy_net(next_states).argmax(1).unsqueeze(1) #NEW
+
+            #next_q_values = self.target_net(next_states)
+            next_q_values = self.target_net(next_states).gather(1, best_actions).squeeze()#NEW
+
             # 1. Soft Value (Entropy-regularized value)
             # Log-Sum-Exp provides a smooth approximation of the maximum
-            soft_value = self.alpha * torch.logsumexp(next_q_values / self.alpha, dim=1)
+            #soft_value = self.alpha * torch.logsumexp(next_q_values / self.alpha, dim=1)
             
             # 2. Brownian Movement (Diffusion term)
             # Adds stochastic noise representing the "random walk" of network jitter
-            brownian_increment = self.sigma * torch.randn_like(soft_value)
+            #brownian_increment = self.sigma * torch.randn_like(soft_value)
             
             # 3. Target Q calculation
-            target_q = rewards + (1 - dones) * self.gamma * (soft_value + brownian_increment)
-
+            #target_q = rewards + (1 - dones) * self.gamma * (soft_value + brownian_increment)
+            #target_q = rewards + (1 - dones) * self.gamma * next_q_values.max(1)[0]
+            target_q = rewards + (1 - dones) * self.gamma * next_q_values #NEW
 
 
         # Compute loss
@@ -205,7 +213,7 @@ class DQNAgent:
         print(f"Model loaded from {filepath}")
 
 
-def train_dqn(env, agent, num_episodes=1000, max_steps=1000, monitor=None):
+def train_dqn(env, agent, num_episodes=200, max_steps=500, monitor=None):
     """
     Training loop for DQN agent
     """
@@ -215,8 +223,9 @@ def train_dqn(env, agent, num_episodes=1000, max_steps=1000, monitor=None):
     print("\n" + "="*60)
     print("Starting DQN Training")
     print("="*60)
-    
-    for episode in range(num_episodes):
+    pbar = tqdm(range(num_episodes), desc="Training Episodes", unit="ep")
+
+    for episode in pbar:
         try:
             # Reset environment
             print(f"\nEpisode {episode + 1}/{num_episodes}: Resetting environment...")
@@ -293,7 +302,13 @@ def train_dqn(env, agent, num_episodes=1000, max_steps=1000, monitor=None):
             episode_rewards.append(episode_reward)
             avg_loss = episode_loss / step_count if step_count > 0 else 0
             episode_losses.append(avg_loss)
-            
+            pbar.set_postfix({
+                'Reward': f"{episode_reward:.1f}",
+                'Avg(10)': f"{np.mean(episode_rewards[-10:]):.1f}",
+                'Loss': f"{avg_loss:.4f}",
+                'Eps': f"{agent.epsilon:.2f}"
+            })
+
             # Log to monitor if available
             if monitor:
                 monitor.log_episode(episode, episode_reward, avg_loss, step_count, 
@@ -349,7 +364,7 @@ def test_dqn(env, agent, num_episodes=10):
             done = False
             step = 0
             
-            while not done and step < 1000:
+            while not done and step < 500:
                 # Select action without exploration
                 action = agent.select_action(state, training=False)
                 next_state, reward, done, info = env.step(action)
@@ -377,13 +392,13 @@ def test_dqn(env, agent, num_episodes=10):
 def main():
     parser = argparse.ArgumentParser(description='DQN Agent for NS3 OpenGym TCP Control')
     parser.add_argument('--port', type=int, default=5555, help='OpenGym port (default: 5555)')
-    parser.add_argument('--episodes', type=int, default=1000, help='Number of training episodes')
+    parser.add_argument('--episodes', type=int, default=200, help='Number of training episodes')
     parser.add_argument('--test', action='store_true', help='Test mode (load existing model)')
     parser.add_argument('--load', type=str, default=None, help='Load model from file')
     parser.add_argument('--save', type=str, default='dqn_tcp_final.pth', help='Save model to file')
     parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'cuda'], 
                         help='Device to use for training')
-    parser.add_argument('--max-steps', type=int, default=1000, help='Max steps per episode')
+    parser.add_argument('--max-steps', type=int, default=500, help='Max steps per episode')
     parser.add_argument('--log-dir', type=str, default='./logs', help='Directory for logs and plots')
     parser.add_argument('--no-monitor', action='store_true', help='Disable training monitoring')
     args = parser.parse_args()

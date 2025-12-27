@@ -89,7 +89,7 @@ class TcpOpenGymEnv : public OpenGymEnv
 {
 public:
   TcpOpenGymEnv () {
-    m_simulationTime = 100.0;
+    m_simulationTime = 50.0;
     m_envStepTime = 0.1;
     m_currentCwnd = 0;
     m_previousCwnd = 0;
@@ -138,7 +138,7 @@ public:
     std::vector<uint32_t> shape = {5,};
     Ptr<OpenGymBoxContainer<float>> box = CreateObject<OpenGymBoxContainer<float>>(shape);
 
-    float normCwnd = std::min(1.0f, (float)m_currentCwnd / 100000.0f);
+    float normCwnd = std::min(1.0f, (float)m_currentCwnd / 10000000.0f);
     float normRtt = std::min(1.0f, (float)m_currentRtt.GetSeconds() / 0.1f);
     float normThroughput = std::min(1.0f, (float)m_throughput / 5000000.0f);
     float normLoss = std::min(1.0f, (float)m_packetLoss / 100.0f);
@@ -153,11 +153,11 @@ public:
                    << normThroughput << ", " << normLoss << ", 0.5]");
     return box;
   }
-
+/*
   float GetReward() override {
     float thrMbps = m_throughput / 1000000.0f;
     float reward = thrMbps * 3.0f; 
-    reward -= (m_currentRtt.GetSeconds() * 2.0f); // Latency penalty
+    reward -= (m_currentRtt.GetSeconds() * 10.0f); // Latency penalty
     reward -= (m_packetLoss * 2.0f);              // Loss penalty
 
 
@@ -165,6 +165,62 @@ public:
                    << " Mbps, rtt=" << m_currentRtt.GetSeconds() << " s, loss=" << m_packetLoss << ")");
     return reward;
   }
+  */
+float GetReward() override {
+    // 1. MATCH YOUR ACTUAL BOTTLENECK (1.5 Mbps)
+    const float MAX_CAPACITY_MBPS = 1.5f; 
+    const float TARGET_RTT_SECONDS = 0.025f; // 25ms is a realistic target for a 2ms link
+    
+    float thrMbps = m_throughput / 1000000.0f;
+    
+    // Normalize Throughput (0.0 to 1.0)
+    float normalizedThr = std::min(thrMbps / MAX_CAPACITY_MBPS, 1.0f);
+    
+    // Normalize RTT (Penalize only if it exceeds target)
+    float rttSeconds = m_currentRtt.GetSeconds();
+    float normalizedRtt = 0.0f;
+    if (rttSeconds > TARGET_RTT_SECONDS) {
+        normalizedRtt = (rttSeconds - TARGET_RTT_SECONDS) / 0.1f; // Scale by 100ms
+    }
+    
+    // Use LOSS COUNT for THIS STEP ONLY
+    float lossPenalty = (float)m_packetLoss * 1.0f; 
+    
+    // RESET loss for the next step so we don't punish the agent forever
+    m_packetLoss = 0; 
+
+    // Balanced Weights
+    // Throughput is the goal (+1.0), RTT/Loss are the constraints (-0.5)
+    float reward = (normalizedThr * 1.0f) - (normalizedRtt * 0.5f) - (lossPenalty * 0.5f);
+    
+    // Keep it in a range DQN likes
+    reward = std::max(std::min(reward, 2.0f), -5.0f);
+    
+    return reward;
+}
+/*
+float GetReward() override {
+    // 1. Calculate Throughput in Mbps
+    // Use std::max to ensure throughput is at least a tiny positive value (e.g., 1 bps)
+    double thrMbps = std::max(1.0, m_throughput) / 1000000.0;
+
+    // 2. Get RTT in seconds
+    // Use std::max to ensure RTT is at least 0.1ms to avoid log(0)
+    double rttSec = std::max(0.0001, m_currentRtt.GetSeconds());
+
+    // 3. Compute log-based reward
+    // This rewards higher throughput and penalizes higher RTT exponentially
+    float reward = std::log(thrMbps) - std::log(rttSec);
+
+    // Optional: Log the values for debugging
+    NS_LOG_UNCOND ("MyGetReward: " << reward 
+                   << " (thr=" << thrMbps << " Mbps"
+                   << ", rtt=" << rttSec << " s)");
+
+    return reward;
+}
+*/
+
 
   // FIXED: Re-formatted for Python TrainingMonitor parser
   std::string GetExtraInfo() override {
@@ -246,10 +302,10 @@ static void DeviceDropTracer (Ptr<TcpOpenGymEnv> env, Ptr<const Packet> p) { env
 // ============================================================================
 int main (int argc, char* argv[])
 {
-  std::string lat = "5ms";
-  std::string rate = "8Mbps";     
-  std::string rate1 = "2.5Mbps";   // Bottleneck
-  double simTime = 100.0;
+  std::string lat = "10ms";
+  std::string rate = "10Mbps";     
+  std::string rate1 = "1.5Mbps";   // Bottleneck
+  double simTime = 50.0;
   double envStepTime = 0.1;
   uint32_t openGymPort = 5555;
   bool openGymEnabled = true;
@@ -324,6 +380,7 @@ int main (int argc, char* argv[])
   app1->Setup (socket1, InetSocketAddress (i6i4.GetAddress (0), port1), 1040, 1000000, DataRate ("1Mbps"));
   c.Get (1)->AddApplication (app1);
   app1->SetStartTime (Seconds (2.));
+  app1->SetStopTime (Seconds (10.));
 
   uint16_t port2 = 8082;
   PacketSinkHelper sinkH2 ("ns3::UdpSocketFactory", InetSocketAddress (Ipv4Address::GetAny (), port2));
@@ -333,6 +390,7 @@ int main (int argc, char* argv[])
   app2->Setup (socket2, InetSocketAddress (i7i4.GetAddress (0), port2), 1040, 1000000, DataRate ("1Mbps"));
   c.Get (2)->AddApplication (app2);
   app2->SetStartTime (Seconds (3.));
+  app2->SetStopTime (Seconds (10.));
 
   if (openGymEnabled) {
     Simulator::Schedule (Seconds(envStepTime), &TcpOpenGymEnv::ScheduleNextStateRead, openGymEnv);
