@@ -83,17 +83,18 @@ class DQNAgent:
         self.state_size = state_size
         self.action_size = action_size
         self.device = device
-        
+        self.tau = 0.005  # Target smoothing coefficient
+
         # Hyperparameters
-        self.gamma = 0.95           # Discount factor 0.99
+        self.gamma = 0.95         # Discount factor 0.95
         self.epsilon = 1          # Exploration rate
         self.epsilon_min = 0.01     # Minimum exploration rate
-        self.epsilon_decay = 0.97  # Exploration decay rate
+        self.epsilon_decay = 0.97  # Exploration decay rate 97 for 200 episode
         self.learning_rate = 0.0005  # Learning rate
         self.batch_size = 64        # Batch size for training
-        self.target_update = 10     # Update target network every N episodes
-        self.alpha = 0.01            # Entropy temperature (Soft Bellman)
-        self.sigma = 0.01           # Brownian diffusion coefficient
+        self.target_update = 20     # Update target network every N episodes
+        #self.alpha = 0.01            # Entropy temperature (Soft Bellman)
+        #self.sigma = 0.01           # Brownian diffusion coefficient
         # Networks
         self.policy_net = DQNNetwork(state_size, action_size).to(device)
         self.target_net = DQNNetwork(state_size, action_size).to(device)
@@ -102,8 +103,9 @@ class DQNAgent:
         
         # Optimizer and loss
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.learning_rate)
-        self.criterion = nn.MSELoss()
-        
+        #self.criterion = nn.MSELoss()
+        self.criterion = nn.SmoothL1Loss()  # This is Huber Loss in PyTorch NEW
+
         # Replay buffer
         self.memory = ReplayBuffer(capacity=10000)
         
@@ -146,11 +148,12 @@ class DQNAgent:
 
 
         with torch.no_grad():
-
-            best_actions = self.policy_net(next_states).argmax(1).unsqueeze(1) #NEW
-
-            #next_q_values = self.target_net(next_states)
-            next_q_values = self.target_net(next_states).gather(1, best_actions).squeeze()#NEW
+            
+            #DDQN: Double DQN Target Calculation
+            #next_actions = self.policy_net(next_states).argmax(1).unsqueeze(1) 
+            next_actions = self.policy_net(next_states).argmax(dim=1, keepdim=True)
+            next_q_values = self.target_net(next_states)
+            next_q = next_q_values.gather(1, next_actions).squeeze()#NEW
 
             # 1. Soft Value (Entropy-regularized value)
             # Log-Sum-Exp provides a smooth approximation of the maximum
@@ -163,7 +166,7 @@ class DQNAgent:
             # 3. Target Q calculation
             #target_q = rewards + (1 - dones) * self.gamma * (soft_value + brownian_increment)
             #target_q = rewards + (1 - dones) * self.gamma * next_q_values.max(1)[0]
-            target_q = rewards + (1 - dones) * self.gamma * next_q_values #NEW
+            target_q = rewards + (1 - dones) * self.gamma * next_q
 
 
         # Compute loss
@@ -172,7 +175,9 @@ class DQNAgent:
         # Optimize
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
+        #torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1.0) #NEW
+
         self.optimizer.step()
         
         return loss.item()
@@ -181,8 +186,14 @@ class DQNAgent:
         """
         Update target network with policy network weights
         """
-        self.target_net.load_state_dict(self.policy_net.state_dict())
-    
+        #self.target_net.load_state_dict(self.policy_net.state_dict())
+        """
+        Soft update model parameters:
+        θ_target = τ*θ_local + (1 - τ)*θ_target
+        """
+        for target_param, policy_param in zip(self.target_net.parameters(), self.policy_net.parameters()):
+            target_param.data.copy_(self.tau * policy_param.data + (1.0 - self.tau) * target_param.data)
+
     def decay_epsilon(self):
         """
         Decay exploration rate
@@ -276,6 +287,8 @@ def train_dqn(env, agent, num_episodes=200, max_steps=500, monitor=None):
                 
                 # Train the agent
                 loss = agent.train()
+                #agent.update_target_network() 
+
                 episode_loss += loss
                 
                 episode_reward += reward

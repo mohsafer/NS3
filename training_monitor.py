@@ -115,7 +115,9 @@ class TrainingMonitor:
         axes[0, 0].grid(True, alpha=0.3)
         
         # Plot losses
-        valid_losses = [l for l in self.episode_losses if l > 0]
+        #valid_losses = [l for l in self.episode_losses if l > 0]
+        valid_losses = [max(1e-6, l)for l in self.episode_losses if l > 0]
+
         if valid_losses:
             axes[0, 1].plot(episodes[:len(valid_losses)], valid_losses, label='Raw', linewidth=2, color='orange')
             if len(valid_losses) >= window_size:
@@ -127,7 +129,7 @@ class TrainingMonitor:
         axes[0, 1].set_title('Training Loss')
         axes[0, 1].legend()
         axes[0, 1].grid(True, alpha=0.3)
-        axes[0, 1].set_yscale('log')
+        axes[0, 1].set_yscale('linear')
         
         # Plot epsilon
         axes[1, 0].plot(episodes, self.epsilon_values, linewidth=2, color='orange')

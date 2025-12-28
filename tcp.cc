@@ -138,7 +138,7 @@ public:
     std::vector<uint32_t> shape = {5,};
     Ptr<OpenGymBoxContainer<float>> box = CreateObject<OpenGymBoxContainer<float>>(shape);
 
-    float normCwnd = std::min(1.0f, (float)m_currentCwnd / 10000000.0f);
+    float normCwnd = std::min(1.0f, (float)m_currentCwnd / 2000000.0f);
     float normRtt = std::min(1.0f, (float)m_currentRtt.GetSeconds() / 0.1f);
     float normThroughput = std::min(1.0f, (float)m_throughput / 5000000.0f);
     float normLoss = std::min(1.0f, (float)m_packetLoss / 100.0f);
@@ -191,8 +191,9 @@ float GetReward() override {
 
     // Balanced Weights
     // Throughput is the goal (+1.0), RTT/Loss are the constraints (-0.5)
-    float reward = (normalizedThr * 1.0f) - (normalizedRtt * 0.5f) - (lossPenalty * 0.5f);
-    
+    //float reward = (normalizedThr * 1.0f) - (normalizedRtt * 0.5f) - (lossPenalty * 0.5f);
+    float reward = (normalizedThr - 0.7f) - (normalizedRtt * 0.5f) - (lossPenalty * 0.5f);
+
     // Keep it in a range DQN likes
     reward = std::max(std::min(reward, 2.0f), -5.0f);
     
