@@ -89,12 +89,12 @@ class DQNAgent:
         self.gamma = 0.95         # Discount factor 0.95
         self.epsilon = 1          # Exploration rate
         self.epsilon_min = 0.01     # Minimum exploration rate
-        self.epsilon_decay = 0.97  # Exploration decay rate 97 for 200 episode
+        self.epsilon_decay = 0.988  # Exploration decay rate 97 for 200 episode
         self.learning_rate = 0.0005  # Learning rate
         self.batch_size = 64        # Batch size for training
         self.target_update = 20     # Update target network every N episodes
-        #self.alpha = 0.01            # Entropy temperature (Soft Bellman)
-        #self.sigma = 0.01           # Brownian diffusion coefficient
+        self.alpha = 0.01            # Entropy temperature (Soft Bellman)
+        self.sigma = 0.01           # Brownian diffusion coefficient
         # Networks
         self.policy_net = DQNNetwork(state_size, action_size).to(device)
         self.target_net = DQNNetwork(state_size, action_size).to(device)
@@ -150,23 +150,22 @@ class DQNAgent:
         with torch.no_grad():
             
             #DDQN: Double DQN Target Calculation
-            #next_actions = self.policy_net(next_states).argmax(1).unsqueeze(1) 
-            next_actions = self.policy_net(next_states).argmax(dim=1, keepdim=True)
-            next_q_values = self.target_net(next_states)
-            next_q = next_q_values.gather(1, next_actions).squeeze()#NEW
+            #next_actions = self.policy_net(next_states).argmax(1).unsqueeze(1) ##############
+            next_actions = self.policy_net(next_states).argmax(dim=1, keepdim=True)  #<<<<<<<<<<<<
+            next_q_values = self.target_net(next_states)   # <<<<<<<<<<<<<<<
+            next_q = next_q_values.gather(1, next_actions).squeeze()#NEW <<<<<<<<<<<<<<<<<
 
             # 1. Soft Value (Entropy-regularized value)
             # Log-Sum-Exp provides a smooth approximation of the maximum
-            #soft_value = self.alpha * torch.logsumexp(next_q_values / self.alpha, dim=1)
-            
-            # 2. Brownian Movement (Diffusion term)
+            soft_value = self.alpha * torch.logsumexp(next_q_values / self.alpha, dim=1)
+                        # 2. Brownian Movement (Diffusion term)
             # Adds stochastic noise representing the "random walk" of network jitter
-            #brownian_increment = self.sigma * torch.randn_like(soft_value)
+            brownian_increment = self.sigma * torch.randn_like(soft_value)
             
             # 3. Target Q calculation
-            #target_q = rewards + (1 - dones) * self.gamma * (soft_value + brownian_increment)
+            target_q = rewards + (1 - dones) * self.gamma *  next_q * (soft_value + brownian_increment)
             #target_q = rewards + (1 - dones) * self.gamma * next_q_values.max(1)[0]
-            target_q = rewards + (1 - dones) * self.gamma * next_q
+            #target_q = rewards + (1 - dones) * self.gamma * next_q # <<<<<<<<<<<<<<<<<<
 
 
         # Compute loss
